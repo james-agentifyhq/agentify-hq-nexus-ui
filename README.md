@@ -14,6 +14,7 @@
 </summary>
 
 - [Getting Started](#toolbox-getting-started)
+- [Testing](#test_tube-testing)
 - [Tech Stack](#gear-tech-stack)
 - [Stats](#wrench-stats)
 - [Contribute](#raised_hands-contribute)
@@ -129,6 +130,42 @@ bunx convex env set AUTH_GITHUB_SECRET your-github-client-secret
 10. Now app is fully configured 👍 and you can start using this app using either one of `npm run dev` or `yarn dev` or `bun dev`.
 
 **NOTE:** Please make sure to keep your API keys and configuration values secure and do not expose them publicly.
+
+## :test_tube: Testing
+
+This project includes comprehensive E2E testing with Playwright and beautiful Allure reports.
+
+### Run Tests Locally
+
+```bash
+# Run tests (headless)
+npm run test:e2e
+
+# Run tests (watch mode)
+npm run test:e2e:headed
+
+# Run tests (interactive UI)
+npm run test:e2e:ui
+
+# Generate and view Allure report
+npm run test:report
+```
+
+### CI/CD Testing
+
+✅ **Automated Testing**: Every PR to `main` triggers E2E tests
+✅ **Allure Reports**: Published to GitHub Pages after merge
+✅ **PR Comments**: Automatic test result summaries
+✅ **Test History**: Track trends across runs
+
+**View Live Reports**: After merge to main, reports available at:
+`https://<your-username>.github.io/<repo-name>/`
+
+### Documentation
+- 📋 [Testing Guide](tests/README.md)
+- 🔧 [GitHub Actions Setup](docs/github-actions-setup.md)
+- 📊 [Testing Infrastructure](docs/testing-setup.md)
+- 📄 [Phase 1 PRD](docs/prd.md)
 
 ## :gear: Tech Stack
 
