@@ -13,10 +13,12 @@ import { useRemoveWorkspace } from '@/features/workspaces/api/use-remove-workspa
 import { useUpdateWorkspace } from '@/features/workspaces/api/use-update-workspace';
 import { useConfirm } from '@/hooks/use-confirm';
 import { useWorkspaceId } from '@/hooks/use-workspace-id';
-import { TrashIcon } from 'lucide-react';
+import { TrashIcon, Bell } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { useCurrentMember } from '@/features/members/api/use-current-member';
+import { NotificationSettings } from '@/features/notifications/components/notification-settings';
 
 interface PreferencesModelProps {
   open: boolean;
@@ -39,6 +41,7 @@ const PreferencesModel = ({
   const [value, setValue] = useState(initialValue);
   const [editOpen, setEditOpen] = useState(false);
 
+  const { data: currentMember } = useCurrentMember({ workspaceId });
   const { mutate: updateWorkspace, isPending: isUpdatingWorkspace } =
     useUpdateWorkspace();
   const { mutate: removeWorkspace, isPending: isRemovingWorkspace } =
@@ -129,6 +132,20 @@ const PreferencesModel = ({
                 </form>
               </DialogContent>
             </Dialog>
+
+            {/* Notification Settings Section */}
+            {currentMember && (
+              <div className="px-5 py-4 bg-white rounded-lg border">
+                <div className="flex items-center gap-x-2 mb-3">
+                  <Bell className="size-4 text-[#1264a3]" />
+                  <p className="text-sm font-semibold">Notification Settings</p>
+                </div>
+                <NotificationSettings
+                  userId={currentMember.userId}
+                  workspaceId={workspaceId}
+                />
+              </div>
+            )}
 
             <button
               disabled={isRemovingWorkspace}

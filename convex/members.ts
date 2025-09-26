@@ -221,3 +221,87 @@ export const remove = mutation({
     return args.id;
   },
 });
+
+/**
+ * Search for members by username for @mention autocomplete
+ *
+ * Story 1.2 AC1: Autocomplete dropdown of workspace members
+ */
+export const getByUsername = query({
+  args: {
+    workspaceId: v.id('workspaces'),
+    searchTerm: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await auth.getUserId(ctx);
+
+    if (!userId) {
+      return [];
+    }
+
+    // Verify current user is member of the workspace
+    const currentMember = await ctx.db
+      .query('members')
+      .withIndex('by_workspace_id_user_id', (q) =>
+        q.eq('workspaceId', args.workspaceId).eq('userId', userId),
+      )
+      .unique();
+
+    if (!currentMember) {
+      return [];
+    }
+
+    // Require minimum search length for performance
+    if (args.searchTerm.trim().length < 1) {
+      return [];
+    }
+
+    const limit = args.limit || 10;
+    const searchTerm = args.searchTerm.toLowerCase().trim();
+
+    // Get all members in workspace
+    const members = await ctx.db
+      .query('members')
+      .withIndex('by_workspace_id', (q) => q.eq('workspaceId', args.workspaceId))
+      .collect();
+
+    // Populate with user data and filter by search term
+    const matchingMembers = [];
+
+    for (const member of members) {
+      if (matchingMembers.length >= limit) {
+        break;
+      }
+
+      const user = await populateUser(ctx, member.userId);
+      if (!user) continue;
+
+      // Search in user's name and email
+      const name = user.name?.toLowerCase() || '';
+      const email = user.email?.toLowerCase() || '';
+
+      // Check if search term matches name or email username part
+      const emailUsername = email.split('@')[0] || '';
+
+      if (
+        name.includes(searchTerm) ||
+        emailUsername.includes(searchTerm) ||
+        email.includes(searchTerm)
+      ) {
+        matchingMembers.push({
+          _id: member._id,
+          userId: member.userId,
+          workspaceId: member.workspaceId,
+          role: member.role,
+          user,
+          // Provide displayName and username for autocomplete
+          displayName: user.name || 'Unknown User',
+          username: emailUsername || user.email || 'unknown',
+        });
+      }
+    }
+
+    return matchingMembers;
+  },
+});

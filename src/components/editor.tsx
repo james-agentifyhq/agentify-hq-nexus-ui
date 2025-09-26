@@ -3,6 +3,7 @@ import { Delta, Op } from 'quill/core';
 import 'quill/dist/quill.snow.css';
 import {
   MutableRefObject,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -18,6 +19,10 @@ import Hint from './hint';
 import { cn } from '@/lib/utils';
 import { EmojiPopover } from './emoji-popover';
 import Image from 'next/image';
+import { findMentionAtCursor } from '@/lib/mentions';
+import { MentionAutocomplete } from '@/features/mentions/components/mention-autocomplete';
+import { Id } from '../../convex/_generated/dataModel';
+import { useWorkspaceId } from '@/hooks/use-workspace-id';
 
 type EditorValue = {
   image: File | null;
@@ -32,6 +37,7 @@ interface EditorProps {
   disabled?: boolean;
   innerRef?: MutableRefObject<Quill | null>;
   variant?: 'create' | 'update';
+  workspaceId?: Id<'workspaces'>;
 }
 
 const Editor = ({
@@ -42,10 +48,22 @@ const Editor = ({
   disabled = false,
   innerRef,
   variant = 'create',
+  workspaceId,
 }: EditorProps) => {
   const [text, setText] = useState('');
   const [image, setImage] = useState<File | null>(null);
   const [isToolbarVisible, setIsToolbarVisible] = useState(true);
+
+  // Mention autocomplete state
+  const [mentionState, setMentionState] = useState<{
+    isVisible: boolean;
+    searchTerm: string;
+    position: { x: number; y: number };
+    mentionStart: number;
+  } | null>(null);
+
+  const currentWorkspaceId = useWorkspaceId();
+  const effectiveWorkspaceId = workspaceId || currentWorkspaceId;
 
   const submitRef = useRef(onSubmit);
   const placeholderRef = useRef(placeholder);
@@ -61,6 +79,64 @@ const Editor = ({
     defaultValueRef.current = defaultValue;
     disabledRef.current = disabled;
   });
+
+  // Handle mention selection
+  const handleMentionSelect = useCallback((user: { username: string; displayName: string }) => {
+    const quill = quillRef.current;
+    if (!quill || !mentionState) return;
+
+    const currentPosition = quill.getSelection()?.index || 0;
+    const beforeMention = quill.getText(0, mentionState.mentionStart);
+    const afterMention = quill.getText(currentPosition);
+
+    // Replace the partial mention with the full username
+    const newContent = `${beforeMention}@${user.username} ${afterMention}`;
+    quill.setText(newContent);
+
+    // Position cursor after the mention
+    const newCursorPosition = mentionState.mentionStart + user.username.length + 2; // @ + username + space
+    quill.setSelection(newCursorPosition);
+
+    setMentionState(null);
+    quill.focus();
+  }, [mentionState]);
+
+  // Handle closing autocomplete
+  const handleMentionClose = useCallback(() => {
+    setMentionState(null);
+    quillRef.current?.focus();
+  }, []);
+
+  // Check for mention trigger and update autocomplete state
+  const checkForMention = useCallback((quill: Quill) => {
+    const selection = quill.getSelection();
+    if (!selection) return;
+
+    const currentText = quill.getText();
+    const cursorPosition = selection.index;
+
+    const mention = findMentionAtCursor(currentText, cursorPosition);
+
+    if (mention && effectiveWorkspaceId) {
+      // Get cursor position relative to editor container for autocomplete positioning
+      const bounds = quill.getBounds(selection.index);
+      const editorRect = containerRef.current?.getBoundingClientRect();
+
+      if (editorRect) {
+        setMentionState({
+          isVisible: true,
+          searchTerm: mention.username,
+          position: {
+            x: bounds.left,
+            y: bounds.bottom + 5,
+          },
+          mentionStart: mention.start,
+        });
+      }
+    } else {
+      setMentionState(null);
+    }
+  }, [effectiveWorkspaceId]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -136,8 +212,13 @@ const Editor = ({
       setText(quill.getText());
     });
 
+    quill.on(Quill.events.SELECTION_CHANGE, () => {
+      checkForMention(quill);
+    });
+
     return () => {
       quill.off(Quill.events.TEXT_CHANGE);
+      quill.off(Quill.events.SELECTION_CHANGE);
 
       if (container) {
         container.innerHTML = '';
@@ -151,7 +232,7 @@ const Editor = ({
         innerRef.current = null;
       }
     };
-  }, [innerRef]);
+  }, [innerRef, checkForMention]);
 
   const toggleToolbar = () => {
     setIsToolbarVisible((prev) => !prev);
@@ -171,7 +252,7 @@ const Editor = ({
     !image && text.replace(/<(.\|\n)*?>/g, '').trim().length === 0;
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col relative">
       <input
         type={'file'}
         ref={imageElementRef}
@@ -305,6 +386,17 @@ const Editor = ({
             <strong>Shift + Return</strong> to add a new line
           </p>
         </div>
+      )}
+
+      {/* Mention Autocomplete */}
+      {mentionState?.isVisible && effectiveWorkspaceId && (
+        <MentionAutocomplete
+          workspaceId={effectiveWorkspaceId}
+          searchTerm={mentionState.searchTerm}
+          position={mentionState.position}
+          onSelect={handleMentionSelect}
+          onClose={handleMentionClose}
+        />
       )}
     </div>
   );

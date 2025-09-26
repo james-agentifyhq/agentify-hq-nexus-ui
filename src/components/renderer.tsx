@@ -1,5 +1,11 @@
-import Quill from 'quill';
 import { useEffect, useRef, useState } from 'react';
+
+// Dynamically import Quill only on client-side
+let Quill: any = null;
+if (typeof window !== 'undefined') {
+  const QuillModule = require('quill');
+  Quill = QuillModule.default || QuillModule;
+}
 
 interface RendererProps {
   value: string;
@@ -10,7 +16,7 @@ const Renderer = ({ value }: RendererProps) => {
   const rendererRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!rendererRef.current) {
+    if (!rendererRef.current || !Quill || typeof document === 'undefined') {
       return;
     }
 

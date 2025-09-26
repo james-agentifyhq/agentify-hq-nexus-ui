@@ -11,11 +11,13 @@ import {
 import { useGetChannels } from '@/features/channels/api/use-get-channels';
 import { useGetMembers } from '@/features/members/api/use-get-members';
 import { useGetWorkspace } from '@/features/workspaces/api/use-get-workspace';
+import { useCurrentMember } from '@/features/members/api/use-current-member';
 import { useWorkspaceId } from '@/hooks/use-workspace-id';
 import { Info, Search } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { NotificationPanel } from '@/features/notifications/components/notification-panel';
 
 const Toolbar = () => {
   const workspaceId = useWorkspaceId();
@@ -24,6 +26,7 @@ const Toolbar = () => {
   const { data } = useGetWorkspace({ id: workspaceId });
   const { data: channels } = useGetChannels({ workspaceId });
   const { data: members } = useGetMembers({ workspaceId });
+  const { data: currentMember } = useCurrentMember({ workspaceId });
 
   const [open, setOpen] = useState(false);
 
@@ -82,7 +85,14 @@ const Toolbar = () => {
         </CommandDialog>
       </div>
 
-      <div className="ml-auto flex-1 flex items-center justify-end">
+      <div className="ml-auto flex-1 flex items-center justify-end gap-1">
+        {currentMember && (
+          <NotificationPanel
+            workspaceId={workspaceId}
+            userId={currentMember.userId}
+            className="flex-shrink-0"
+          />
+        )}
         <Button variant={'transparent'} size={'iconSm'}>
           <Info className="size-5 text-white" />
         </Button>

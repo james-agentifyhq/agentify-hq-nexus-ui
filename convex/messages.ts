@@ -1,8 +1,10 @@
-import { mutation, query, QueryCtx } from './_generated/server';
+import { mutation, query, QueryCtx, MutationCtx } from './_generated/server';
 import { v } from 'convex/values';
 import { Doc, Id } from './_generated/dataModel';
 import { auth } from './auth';
 import { paginationOptsValidator } from 'convex/server';
+// Import direct preference checking logic
+// Note: shouldSendNotification is a query, so we'll implement the logic here
 
 const populateThread = async (ctx: QueryCtx, messageId: Id<'messages'>) => {
   const messages = await ctx.db
@@ -69,6 +71,178 @@ const getMember = async (
       q.eq('workspaceId', workspaceId).eq('userId', userId),
     )
     .unique();
+};
+
+/**
+ * Extract usernames from @mention patterns in message text
+ * Returns array of mentioned usernames without @ symbol
+ */
+const extractMentions = (messageBody: string): string[] => {
+  const mentionRegex = /@(\w+)/g;
+  const mentions: string[] = [];
+  let match;
+
+  while ((match = mentionRegex.exec(messageBody)) !== null) {
+    mentions.push(match[1]); // Extract username without @
+  }
+
+  return Array.from(new Set(mentions)); // Remove duplicates
+};
+
+/**
+ * Find user IDs for mentioned usernames in the workspace
+ */
+const getMentionedUsers = async (
+  ctx: MutationCtx,
+  workspaceId: Id<'workspaces'>,
+  usernames: string[]
+): Promise<Id<'users'>[]> => {
+  if (usernames.length === 0) return [];
+
+  const members = await ctx.db
+    .query('members')
+    .withIndex('by_workspace_id', (q) => q.eq('workspaceId', workspaceId))
+    .collect();
+
+  const users = await Promise.all(
+    members.map(member => ctx.db.get(member.userId))
+  );
+
+  const mentionedUserIds: Id<'users'>[] = [];
+
+  for (let i = 0; i < users.length; i++) {
+    const user = users[i];
+    if (user && user.name && usernames.includes(user.name)) {
+      mentionedUserIds.push(user._id);
+    }
+  }
+
+  return mentionedUserIds;
+};
+
+/**
+ * Check if a notification should be sent based on user preferences
+ */
+const checkNotificationPreferences = async (
+  ctx: MutationCtx,
+  userId: Id<'users'>,
+  workspaceId: Id<'workspaces'>,
+  channelId?: Id<'channels'>
+): Promise<boolean> => {
+  // Get user preferences
+  const preferences = await ctx.db
+    .query('notificationPreferences')
+    .withIndex('by_user_workspace', (q) =>
+      q.eq('userId', userId).eq('workspaceId', workspaceId)
+    )
+    .unique();
+
+  // If no preferences exist, default to enabled
+  if (!preferences) {
+    return true;
+  }
+
+  // Check if notifications are globally disabled
+  if (!preferences.globalPreferences.mentions) {
+    return false;
+  }
+
+  // Check channel-specific preferences if available
+  if (channelId && preferences.channelPreferences) {
+    const channelPref = preferences.channelPreferences.find(
+      cp => cp.channelId === channelId
+    );
+
+    if (channelPref) {
+      // Channel is muted
+      if (channelPref.mutedUntil && channelPref.mutedUntil > Date.now()) {
+        return false;
+      }
+
+      // Channel mentions override global setting
+      if (channelPref.mentions === 'disabled') {
+        return false;
+      } else if (channelPref.mentions === 'enabled') {
+        return true;
+      }
+      // 'inherit' falls through to global setting
+    }
+  }
+
+  // Check quiet hours
+  if (preferences.globalPreferences.quietHours?.enabled) {
+    const now = new Date();
+    const currentHour = now.getHours();
+    const startHour = parseInt(preferences.globalPreferences.quietHours.startTime.split(':')[0]);
+    const endHour = parseInt(preferences.globalPreferences.quietHours.endTime.split(':')[0]);
+
+    if (startHour < endHour) {
+      // Same day quiet hours
+      if (currentHour >= startHour && currentHour < endHour) {
+        return false;
+      }
+    } else {
+      // Cross-midnight quiet hours
+      if (currentHour >= startHour || currentHour < endHour) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+};
+
+/**
+ * Handle notification creation for @mentions with preference enforcement
+ */
+const handleMentionNotifications = async (
+  ctx: MutationCtx,
+  messageId: Id<'messages'>,
+  messageBody: string,
+  workspaceId: Id<'workspaces'>,
+  channelId?: Id<'channels'>,
+  conversationId?: Id<'conversations'>,
+  authorUserId?: Id<'users'>
+) => {
+  // Extract mentions from message
+  const mentionedUsernames = extractMentions(messageBody);
+
+  if (mentionedUsernames.length === 0) {
+    return; // No mentions found
+  }
+
+  // Find user IDs for mentioned usernames
+  const mentionedUserIds = await getMentionedUsers(ctx, workspaceId, mentionedUsernames);
+
+  // Create notifications for each mentioned user (if preferences allow)
+  for (const userId of mentionedUserIds) {
+    // Don't notify users about their own messages
+    if (authorUserId && userId === authorUserId) {
+      continue;
+    }
+
+    // Check notification preferences
+    const shouldNotify = await checkNotificationPreferences(
+      ctx,
+      userId,
+      workspaceId,
+      channelId
+    );
+
+    if (shouldNotify) {
+      // Create notification using the notifications API
+      await ctx.db.insert('notifications', {
+        userId,
+        messageId,
+        workspaceId,
+        channelId,
+        conversationId,
+        type: 'mention',
+        read: false,
+        createdAt: Date.now(),
+      });
+    }
+  }
 };
 
 export const remove = mutation({
@@ -361,6 +535,17 @@ export const create = mutation({
       workspaceId: args.workspaceId,
       parentMessageId: args.parentMessageId,
     });
+
+    // Handle @mention notifications with preference enforcement
+    await handleMentionNotifications(
+      ctx,
+      messageId,
+      args.body,
+      args.workspaceId,
+      args.channelId,
+      _conversationId,
+      userId
+    );
 
     return messageId;
   },

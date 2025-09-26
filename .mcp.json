@@ -1,0 +1,30 @@
+{
+    "mcpServers": {
+      "shadcn-ui": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "@jpisnice/shadcn-ui-mcp-server"
+        ],
+        "env": {}
+      }, 
+      "context7": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@upstash/context7-mcp"
+        ],
+        "env": {}
+      },
+      "playwright": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@playwright/mcp@latest"
+        ],
+        "env": {}
+      }      
+    }
+}
